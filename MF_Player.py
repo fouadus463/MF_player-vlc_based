@@ -115,7 +115,15 @@ while is_running:  # Continue until user exits
                 print(f"volume set to {volume}%")
             except ValueError:
                 print("Invalid volume value. use v 50")
-        elif choose == "m":
+        elif choose == "m" or choose == "mute":
+            if player.audio_get_mute():
+                player.audii_get_mute(False)
+                print("audio is unmuted...)
+            elif: 
+                player.audio_get_mute()
+                player.audio_set_mute(True)
+                print("audio is muted")
+elif choose == "m":
             if player.audio_get_mute():
                 player.audio_set_mute(false)
                 print("Unmuted.")
