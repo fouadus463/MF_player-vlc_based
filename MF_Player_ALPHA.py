@@ -1,314 +1,339 @@
 #!/usr/bin/env python3
+"""
+Simple terminal media player using python-vlc.
+
+- Very linear and beginner-friendly.
+- Clear blocks: setup -> playlist -> main loop -> command handling.
+- Keep it simple: only basic commands, easy to understand.
+"""
+
 import os
 import sys
 import time
 
+# Try to import vlc; if it fails, give a clear message and stop.
 try:
     import vlc
 except Exception:
-    print("MF_Player can't find or load vlc")
-    print("Please try to fix it by:")
-    print(" - install VLC (system package)")
-    print(" - install python-vlc via pip")
-    raise
-
-ALLOWED = (".mp3", ".wav", ".flac", ".ogg", ".mp4")  # supported extensions
+    print("MF_Player can't find or load python-vlc (libVLC).")
+    print("Install system VLC and python-vlc, e.g.:")
+    print("  sudo apt install vlc")
+    print("  pip install python-vlc")
+    sys.exit(1)
 
 
-def get_media_folder():
-    # return folder from argv or default "audio" in cwd
-    if len(sys.argv) > 1:
-        return sys.argv[1]
-    return os.path.join(os.getcwd(), "audio")
+# ---------------------------
+# Configuration / Constants
+# ---------------------------
+ALLOWED_EXT = (".mp3", ".wav", ".flac", ".ogg", ".mp4")
 
 
-def collect_files(media_folder, allowed=ALLOWED):
-    # gather and return sorted media file paths
-    if not os.path.isdir(media_folder):
-        print("Folder not found", media_folder)
-        print("Create the folder and put media files there, or run:")
-        print("  python player.py /your/folder")
-        sys.exit(1)
-    result = []
-    for name in os.listdir(media_folder):
-        full = os.path.join(media_folder, name)
-        if not os.path.isfile(full):
-            continue
-        if full.lower().endswith(allowed):
-            result.append(full)
-    result.sort()
-    if not result:
-        print("No media files found in:", media_folder)
-        print("Supported extensions:", allowed)
-        sys.exit(1)
-    return result
+# ---------------------------
+# Small utility helpers
+# ---------------------------
 
-
-def print_playlist(files):
-    # print playlist names only
-    print("Playlist:")
-    for i, f in enumerate(files, 1):
-        print(f" {i}. {os.path.basename(f)}")
-
-
-def init_player():
-    # create and return VLC instance and player
-    instance = vlc.Instance()
-    player = instance.media_player_new()
-    return instance, player
-
-
-def set_track(player, instance, path):
-    # load a file into the player and start playback
-    try:
-        media = instance.media_new(path)
-        player.set_media(media)
-        player.play()
-        time.sleep(0.5)
-    except Exception as e:
-        print("Error loading track:", e)
-
-
-def clamp_index(index, length):
-    # wrap index around playlist using modulo
-    if length <= 0:
-        return 0
-    return index % length
-
-
-def change_volume_by(player, delta):
-    # change volume by delta and clamp 0-100
-    try:
-        current = player.audio_get_volume()
-        if current is None or current < 0:
-            current = 0
-    except Exception:
-        current = 0
-    new = max(0, min(100, current + delta))
-    try:
-        player.audio_set_volume(new)
-    except Exception:
-        pass
-    print(f"volume set to: {new}")
-
-
-def ms_to_mmss(ms):
+def human_time(ms):
+    """Convert milliseconds to MM:SS (simple). Return '--:--' if unknown."""
     if not ms or ms <= 0:
-        return "00:00"
-    m, s = divmod(ms // 1000, 60)
+        return "--:--"
+    seconds = int(ms // 1000)
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h:d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
 
 def clear_screen():
-    # cross-platform clear
+    """Clear terminal screen (cross-platform)."""
     if os.name == "nt":
         os.system("cls")
     else:
         os.system("clear")
 
 
-def refresh_display(player, files, current_index):
+# ---------------------------
+# Playlist helpers
+# ---------------------------
+
+def get_media_folder_from_args():
+    """Get media folder from argv or default to ./audio."""
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return os.path.join(os.getcwd(), "audio")
+
+
+def find_media_files(folder):
+    """
+    Return sorted list of media file paths.
+    Exits the program with a message if folder missing or empty.
+    """
+    if not os.path.isdir(folder):
+        print("Folder not found:", folder)
+        print("Create it and put media files there, or run:")
+        print("  python simple_player.py /path/to/folder")
+        sys.exit(1)
+
+    files = []
+    for name in os.listdir(folder):
+        full = os.path.join(folder, name)
+        if os.path.isfile(full) and full.lower().endswith(ALLOWED_EXT):
+            files.append(full)
+
+    files.sort()
+    if not files:
+        print("No media files found in:", folder)
+        print("Supported extensions:", ALLOWED_EXT)
+        sys.exit(1)
+    return files
+
+
+def print_playlist(files, current_index=0):
+    """Show the playlist with the current track marked with '>'."""
+    print("Playlist:")
+    for i, path in enumerate(files):
+        marker = ">" if i == current_index else " "
+        print(f" {marker} {i+1:03d}. {os.path.basename(path)}")
+
+
+# ---------------------------
+# Player helpers (simple)
+# ---------------------------
+
+def create_vlc_player():
+    """Create and return a vlc instance and player."""
+    inst = vlc.Instance()
+    player = inst.media_player_new()
+    return inst, player
+
+
+def play_track(player, instance, path):
+    """Load the path into the player and start playback."""
+    media = instance.media_new(path)
+    player.set_media(media)
+    player.play()
+    # small sleep helps VLC start and give reliable get_time/get_length calls
+    time.sleep(0.3)
+
+
+def clamp_index(index, n):
+    """Wrap index into [0, n-1] using modulo. If n==0 return 0."""
+    if n <= 0:
+        return 0
+    return index % n
+
+
+# ---------------------------
+# Simple display for the user
+# ---------------------------
+
+def show_ui(player, files, current_index):
+    """
+    Clear screen and show:
+      - current state, time, volume
+      - short playlist with marker on current
+      - short help line
+    """
     clear_screen()
-    # header / status
+    # try reading some values; keep things simple and tolerant of errors
     try:
         state = str(player.get_state())
     except Exception:
         state = "UNKNOWN"
 
     try:
-        length_ms = player.get_length()
-        position_ms = player.get_time()
+        pos = player.get_time()
+        length = player.get_length()
     except Exception:
-        length_ms = -1
-        position_ms = -1
+        pos = -1
+        length = -1
 
     try:
-        volume = player.audio_get_volume()
+        vol = player.audio_get_volume()
     except Exception:
-        volume = "?"
+        vol = "?"
 
-    try:
-        muted = player.audio_get_mute()
-    except Exception:
-        muted = False
+    print(f"State: {state}   Track: {current_index + 1}/{len(files)}")
+    print(f"Time : {human_time(pos)} / {human_time(length)}")
+    print(f"Volume: {vol}")
+    print("-" * 60)
 
-    print(f"state: {state}  Track: {current_index + 1}/{len(files)}")
-    print(f"time: {ms_to_mmss(position_ms)} / {ms_to_mmss(length_ms)}")
-    print(f"volume: {volume}  muted: {muted}")
-    print("_" * 60)
-
-    # playlist (compact; mark current track with >)
+    # playlist: show all (for beginners it's simpler to see whole list)
     for i, path in enumerate(files):
         name = os.path.basename(path)
         marker = ">" if i == current_index else " "
         print(f"{marker} {i+1:03d}. {name}")
 
-    print("_" * 60)
-    print("Command: play/pause, stop, next, prev, v <0-100>, mute, seek <sec>, quit")
+    print("-" * 60)
+    print("Commands: play | pause | stop | next | prev | v N | v+ | v- | m | pl | exit")
 
 
-def set_volume(player, value):
-    # set exact volume value 0-100
-    value = max(0, min(100, value))
-    try:
-        player.audio_set_volume(value)
-    except Exception:
-        pass
-    print(f"volume set to {value}%")
+# ---------------------------
+# Command loop (main)
+# ---------------------------
 
+def main_loop(player, instance, files, folder, start_index=0):
+    """
+    Very linear main loop:
+      - set current index
+      - play the track
+      - inside inner loop: show UI, read user input, handle commands
+      - when user selects next/prev we break to outer loop and start new track
+    """
+    current = clamp_index(start_index, len(files))
 
-def toggle_mute(player):
-    # toggle mute state
-    try:
-        muted = player.audio_get_mute()
-    except Exception:
-        muted = False
-    new_state = not muted
-    try:
-        player.audio_set_mute(new_state)
-    except Exception:
-        pass
-    print("Muted." if new_state else "Unmuted.")
-
-
-def command_loop(player, instance, files, media_folder, start_index=0, refresh_ui=None):
-    # main loop: plays tracks and handles user commands
-    current_index = clamp_index(start_index, len(files))
     running = True
     while running:
-        print(f"\nNow playing [{current_index + 1}/{len(files)}]: {os.path.basename(files[current_index])}")
-        set_track(player, instance, files[current_index])
+        # Announce and start playing the current track
+        print(f"\nNow playing [{current+1}/{len(files)}]: {os.path.basename(files[current])}")
+        play_track(player, instance, files[current])
 
+        # Inner loop: handle commands while this track is active
         while True:
-            # refresh UI if provided (call before input so CLI can update)
-            if callable(refresh_ui):
-                try:
-                    refresh_ui(player, files, current_index)
-                except Exception:
-                    pass
+            # Refresh UI so user sees updated time/volume
+            show_ui(player, files, current)
 
-            # command menu
-            print("\n--- Commands ---")
-            print("p : play")
-            print("pause : pause/resume")
-            print("s : stop")
-            print("n : next")
-            print("b : back/previous")
-            print("pl : show playlist (reloads folder)")
-            print("exit : exit")
-            print("volume : show current volume")
-            print("v+ : increase volume")
-            print("v- : decrease volume")
-            print("v N : set volume to N (0-100) e.g. v 50")
-            print("m : mute/unmute")
-
+            # Show short command prompt
             try:
-                choose = input("Enter command: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print("\nGoodbye!")
+                cmd = input("\nEnter command: ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print("\nExiting.")
                 try:
                     player.stop()
                 except Exception:
                     pass
                 return
 
-            if choose in ("p", "play"):
+            # PLAY
+            if cmd in ("play", "p"):
                 try:
                     player.play()
                 except Exception:
                     pass
-                time.sleep(0.2)
+                time.sleep(0.1)
 
-            elif choose == "pause":
+            # PAUSE / RESUME
+            elif cmd == "pause":
                 try:
                     player.pause()
                 except Exception:
                     pass
-                time.sleep(0.2)
-
-            elif choose in ("s", "stop"):
-                try:
-                    player.stop()
-                except Exception:
-                    pass
                 time.sleep(0.1)
 
-            elif choose == "volume":
+            # STOP
+            elif cmd in ("stop", "s"):
                 try:
-                    v = player.audio_get_volume()
+                    player.stop()
                 except Exception:
-                    v = 0
-                print(f"current volume : {v}")
+                    pass
+                time.sleep(0.05)
 
-            elif choose == "v+":
-                change_volume_by(player, 10)
+            # VOLUME show
+            elif cmd == "volume":
+                try:
+                    print("Volume:", player.audio_get_volume())
+                except Exception:
+                    print("Volume: ?")
 
-            elif choose == "v-":
-                change_volume_by(player, -10)
+            # V+ / V- quick changes
+            elif cmd == "v+":
+                try:
+                    cur = player.audio_get_volume() or 0
+                    new = min(100, cur + 10)
+                    player.audio_set_volume(new)
+                    print("Volume set to", new)
+                except Exception:
+                    pass
 
-            elif choose.startswith("v "):
-                parts = choose.split()
+            elif cmd == "v-":
+                try:
+                    cur = player.audio_get_volume() or 0
+                    new = max(0, cur - 10)
+                    player.audio_set_volume(new)
+                    print("Volume set to", new)
+                except Exception:
+                    pass
+
+            # Set volume exactly: "v 50" or "v 75"
+            elif cmd.startswith("v "):
+                parts = cmd.split()
                 if len(parts) >= 2:
                     try:
-                        vol = int(parts[1])
-                        set_volume(player, vol)
-                    except ValueError:
-                        print("Invalid volume value. use v 50")
+                        val = int(parts[1])
+                        val = max(0, min(100, val))
+                        player.audio_set_volume(val)
+                        print("Volume set to", val)
+                    except Exception:
+                        print("Invalid volume value. Use: v 50")
                 else:
-                    print("Invalid command. use v 50")
+                    print("Use: v 50")
 
-            elif choose == "m":
-                toggle_mute(player)
+            # MUTE toggle
+            elif cmd == "m":
+                try:
+                    cur = player.audio_get_mute()
+                    player.audio_set_mute(not cur)
+                    print("Muted." if not cur else "Unmuted.")
+                except Exception:
+                    print("Mute toggle failed.")
 
-            elif choose in ("n", "next"):
+            # NEXT track
+            elif cmd in ("next", "n"):
                 try:
                     player.stop()
                 except Exception:
                     pass
-                current_index = clamp_index(current_index + 1, len(files))
-                break
+                current = clamp_index(current + 1, len(files))
+                break  # break inner loop -> start new track in outer loop
 
-            elif choose in ("b", "back", "previous"):
+            # PREVIOUS track
+            elif cmd in ("prev", "b", "back"):
                 try:
                     player.stop()
                 except Exception:
                     pass
-                current_index = clamp_index(current_index - 1, len(files))
+                current = clamp_index(current - 1, len(files))
                 break
 
-            elif choose == "pl":
-                # reload playlist from the same media folder
+            # RELOAD playlist from folder and show it
+            elif cmd == "pl":
                 try:
-                    new_files = collect_files(media_folder)
-                    files[:] = new_files  # update in-place so outer reference stays valid
-                    print_playlist(files)
+                    new_files = find_media_files(folder)
+                    files[:] = new_files   # update list in-place
+                    print_playlist(files, current)
                 except Exception as e:
-                    print("Error reloading playlist:", e)
-                # don't change current_index here; let user choose next action
-                continue
+                    print("Failed to reload playlist:", e)
+                # remain in inner loop
 
-            elif choose in ("exit", "quit"):
-                print("Goodbye!")
+            # EXIT
+            elif cmd in ("exit", "quit"):
+                print("Goodbye.")
                 try:
                     player.stop()
                 except Exception:
                     pass
-                running = False
-                break
+                return
 
+            # Unknown command
             else:
-                print("I don't understand that command.")
+                print("Unknown command. Try: play, pause, next, prev, v 50, m, pl, exit")
 
+
+# ---------------------------
+# Program entry
+# ---------------------------
 
 def main():
-    # program entry: gather files, init player and start command loop
-    media_folder = get_media_folder()
-    files = collect_files(media_folder)
-    print_playlist(files)
-    instance, player = init_player()
+    folder = get_media_folder_from_args()
+    files = find_media_files(folder)
+    print_playlist(files, 0)
+
+    inst, player = create_vlc_player()
+
     try:
-        command_loop(player, instance, files, media_folder, start_index=0, refresh_ui=refresh_display)
+        main_loop(player, inst, files, folder, start_index=0)
     finally:
+        # Ensure we stop playback on exit
         try:
             player.stop()
         except Exception:
