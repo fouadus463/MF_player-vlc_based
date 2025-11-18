@@ -30,7 +30,7 @@ You may be prompted to enter a file path or select media based on your implement
 
 ## Maintainer
 
-- [mehdusa463](https://github.com/mehdusa463)
+- [fouadus463](https://github.com/mehdusa463)
 
 ## License
 
