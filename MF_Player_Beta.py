@@ -9,12 +9,9 @@ This version adds:
 import os
 import sys
 import time
-
-# THREAD / QUEUE imports for non-blocking input
 import threading
 import queue
 
-# Try to import vlc; if it fails, give a clear message and stop.
 try:
     import vlc
 except Exception:
