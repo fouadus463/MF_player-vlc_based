@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-Simple terminal media player using python-vlc.
-
 This version adds:
- - a small STATE global (already present in your upload),
+ - a small STATE global,
  - a VLC end-of-track handler (_on_track_end),
  - a background input thread + queue so input() won't block UI updates.
-
-It is a single-file script intended to replace your current /mnt/data/MF_Player_ALPHA.py.
 """
 
 import os
